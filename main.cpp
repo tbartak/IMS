@@ -2,28 +2,23 @@
 #include <iostream>
 #include <algorithm>
 
-// deklarace obslužných linek
-// deklarace tříd popisujících procesy a události
-// popis simulačního experimentu ve funkci main()
-
-Facility seller("Obsluha/Zaměstnanec");           // Obsluha s kapacitou 1
-Store equipment(100);      // Sklad vybavení se 100 kusy
-double x = 120;             // Střední hodnota mezi rezervacemi (v minutách) // TODO: bude jako parametr
-double extra_time = 30 * 24 * 60;  // Extra 30 days for returns after the season ends
+Facility seller("Obsluha/Zaměstnanec"); // Obsluha s kapacitou 1
+Store equipment(40);                    // Sklad vybavení se 40 kusy
+double x = 720;                         // Střední hodnota mezi rezervacemi (v minutách) // TODO: bude jako parametr
 
 // Délka sezóny a mimo sezóny v minutách
-const double MONTH = 30 * 24 * 60;           // Jeden měsíc v minutách
-const double SEASON_DURATION = 6.5 * MONTH;  // Délka sezóny
-// const double OFF_SEASON_DURATION = 5.5 * MONTH;  // Délka mimo sezóny
+const double MONTH = 30 * 24 * 60;              // Jeden měsíc v minutách
+const double SEASON_DURATION = 6.5 * MONTH;     // Délka sezóny
+const double OFF_SEASON_DURATION = 5.5 * MONTH; // Délka mimo sezóny
 
 // Vytvoření nové rezervace s exponenciálním rozložením se středem x
 double ReservationInterval() {
     return Exponential(x);
 }
 
-// Simulování domluveného termínu (exponenciálně např. 2 týdny dopředu)
+// Simulování domluveného termínu rezervace
 double AgreedTime() {
-    return Exponential(14 * 24 * 60);  // Exponenciální rozložení se střední hodnotou 14 dní
+    return Uniform(7 * 24 * 60, 30 * 24 * 60);  // 7-30 dní v minutách
 }
 
 // Simulování doby nafukování + poučení o používání
@@ -80,8 +75,7 @@ public:
     EquipmentDrying(int n) : amount(n) {}
     void Behavior() {
         Wait(DryingTime());
-        // Enter(equipment, amount);
-        // TODO: vybavení je sušené a je znovu k dispozici (vrátí se do skladu), zkontrolovat, jestli se opravdu vrátilo do skladu
+        Leave(equipment, amount);
     }
 };
 
@@ -92,18 +86,21 @@ public:
     EquipmentRepair(int n) : amount(n) {}
     void Behavior() {
         Wait(RepairTime());  // 1-2 týdny
-        // Leave(equipment, amount);
-        Enter(equipment, amount); // vybavení je opravené a je znovu k dispozici (vrátí se do skladu)
+        Leave(equipment, amount);
     }
 };
 
 // Třída představující rezervaci
 class Reservation : public Process {
-    // int requestedEquipment = 1;  // Počet požadovaného vybavení
-
     void Behavior() {      
+
         // Čekání do domluveného termínu
         Wait(AgreedTime());
+        
+        // Kontrola dostupnosti vybavení
+        int requestedEquipment = RandomEquipmentAmount(); // Náhodný počet vybavení (1-30, průměrně 2)
+        Enter(equipment, requestedEquipment); // TODO: přidat nějakou pravděpodobnost, že zákazník odejde, pokud není dostatek vybavení po nějakou dobu
+
         // Žádost o obsluhu prodavačem (zákazník přichází, čeká na obsluhu)
         Seize(seller);
 
@@ -118,9 +115,6 @@ class Reservation : public Process {
         Release(seller);
 
         // Vypůjčení vybavení
-        // Kontrola dostupnosti vybavení
-        int requestedEquipment = RandomEquipmentAmount(); // Náhodný počet vybavení (1-30, průměrně 2)
-        Enter(equipment, requestedEquipment);
         // Čekání po dobu výpůjčky
         Wait(BorrowTime());
 
@@ -135,18 +129,19 @@ class Reservation : public Process {
         if (Random() < 0.05) {  // 5% pravděpodobnost poškození
             // Vyřizování škod se zákazníkem
             Wait(DamageSettlementTime());
+            // Uvolnění obsluhy
+            Release(seller);
             // Vybavení jde do opravy
-            Leave(equipment, requestedEquipment);
             (new EquipmentRepair(requestedEquipment))->Activate();
+            // Leave(equipment, requestedEquipment);
         } else {
-            // Vybavení je v pořádku
-            Leave(equipment, requestedEquipment);
             // Sušení vybavení
             (new EquipmentDrying(requestedEquipment))->Activate();
+            // Uvolnění obsluhy
+            Release(seller);
+            // Vybavení je v pořádku
+            // Leave(equipment, requestedEquipment);
         }
-
-        // Uvolnění obsluhy
-        Release(seller);
     }
 };
 
@@ -154,26 +149,17 @@ class Reservation : public Process {
 class ReservationGenerator : public Event {
     void Behavior() {
         // Sezóna - generátor je aktivní
-        double season_end = Time + SEASON_DURATION;
-        if (Time < season_end) { // TODO: zkontrolovat, jestli tu nemá být místo if while cyklus
+        if (Time < SEASON_DURATION) { // TODO: zkontrolovat, jestli tu nemá být místo if while cyklus
             (new Reservation)->Activate();
             Activate(Time + ReservationInterval());
-            //Passivate();
         }
     }
 };
 
-// Generátor rezervací
-// class ReservationGenerator : public Event {
-//     void Behavior() {
-//         (new Reservation)->Activate();
-//         Activate(Time + ReservationInterval());
-//     }
-// };
-
 int main() {
     // Inicializace simulace
-    Init(0, SEASON_DURATION + extra_time);  // Simulace aktivní sezóny
+    double simulation_duration = SEASON_DURATION + OFF_SEASON_DURATION;
+    Init(0, simulation_duration);  // Simulace aktivní sezóny
     // Aktivace generátoru rezervací
     (new ReservationGenerator)->Activate();
     // Spuštění simulace
