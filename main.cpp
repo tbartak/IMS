@@ -5,6 +5,7 @@
 Facility seller("Obsluha/Zaměstnanec"); // Obsluha s kapacitou 1
 Store equipment(40);                    // Sklad vybavení se 40 kusy
 double x = 720;                         // Střední hodnota mezi rezervacemi (v minutách) // TODO: bude jako parametr
+bool bigReservation = false;            // Příznak, zda se jedná o velkou skupinku
 
 // Délka sezóny a mimo sezóny v minutách
 const double MONTH = 30 * 24 * 60;              // Jeden měsíc v minutách
@@ -16,19 +17,35 @@ double ReservationInterval() {
     return Exponential(x);
 }
 
+double BigReservationInterval() {
+    return Exponential(20 * x);
+}
+
 // Simulování domluveného termínu rezervace
 double AgreedTime() {
     return Uniform(7 * 24 * 60, 30 * 24 * 60);  // 7-30 dní v minutách
 }
 
 // Simulování doby nafukování + poučení o používání
-double InflatingTime() {
-    return Uniform(3, 8);  // 3 to 8 minutes
+double InflatingTime(int amount) {
+    int sum = 0;
+
+    for(int i = 0; i < amount; i++) {
+        sum += Uniform(3, 8);   // 3 to 8 minutes
+    }
+    
+    return sum;  
 }
 
 // Simulování doby předvedení + vyfouknutí a sbalení
-double DemonstratingTime() {
-    return Exponential(10);  // Exponenciální rozložení se střední hodnotou 10 minut
+double DemonstratingTime(int amount) {
+    int sum = 0;
+    
+    for(int i = 0; i < amount; i++) {
+        sum += Exponential(10);  // Exponenciální rozložení se střední hodnotou 10 minut
+    }
+    
+    return sum;
 }
 
 // Simulování předání zbytku vybavení + podpis smlouvy, doplacení, ...
@@ -42,14 +59,22 @@ double BorrowTime() {
 }
 
 // Doba kontroly vybavení při vrácení
-double CheckTime() {
+double CheckTime(int amount) {
     // Implementace doby kontroly
-    return Uniform(5, 10);  // 5 to 10 minutes
+    int sum = 0;
+    for (int i = 0; i < amount; i++) {
+        sum += Uniform(5, 10); // 5 to 10 minutes
+    }
+    return sum;
 }
 
 // Simulování doby vysoušení vybavení
-double DryingTime() {
-    return Uniform(2, 15);  // 2 to 15 minutes
+double DryingTime(int amount) {
+    int sum = 0;
+    for (int i = 0; i < amount; i++) {
+        sum += Uniform(2, 15); // 2 to 15 minutes
+    }
+    return sum; 
 }
 
 // Simulování doby opravy vybavení
@@ -64,8 +89,18 @@ double DamageSettlementTime() {
 
 // Simulování náhodného počtu chtěného vybavení
 int RandomEquipmentAmount() {
-    int amount = int(Exponential(2)) + 1;  // Průměrně 2, minimálně 1
-    return (amount > 30) ? 30 : amount;    // Maximálně 30
+    int amount = 0;
+    // Průměrně 2 kusy vybavení, pro velké skupinky 20 kusů
+    bigReservation ? amount = int(Exponential(20)) + 10 : amount = int(Exponential(2)) + 1;
+    std::cout << "Requested equipment: " << amount << std::endl;
+    
+    // V případě velké skupinky se omezí počet vybavení na 40, jinak 30
+    if(bigReservation) {
+        bigReservation = false;
+        return (amount > 40) ? 40 : amount;
+    } else {
+        return (amount > 10) ? 10 : amount;
+    }
 }
 
 // Proces sušení vybavení
@@ -74,7 +109,7 @@ class EquipmentDrying : public Process {
 public:
     EquipmentDrying(int n) : amount(n) {}
     void Behavior() {
-        Wait(DryingTime());
+        Wait(DryingTime(amount));
         Leave(equipment, amount);
     }
 };
@@ -99,16 +134,16 @@ class Reservation : public Process {
         
         // Kontrola dostupnosti vybavení
         int requestedEquipment = RandomEquipmentAmount(); // Náhodný počet vybavení (1-30, průměrně 2)
-        Enter(equipment, requestedEquipment); // TODO: přidat nějakou pravděpodobnost, že zákazník odejde, pokud není dostatek vybavení po nějakou dobu
+        Enter(equipment, requestedEquipment);
 
         // Žádost o obsluhu prodavačem (zákazník přichází, čeká na obsluhu)
         Seize(seller);
 
         // Obsluha zákazníka:
         // Krok 1: Nafouknutí lodě a poučení o používání
-        Wait(InflatingTime());
+        Wait(InflatingTime(requestedEquipment));
         // Krok 2: Předvedení lodě, vyfouknutí a sbalení
-        Wait(DemonstratingTime());
+        Wait(DemonstratingTime(requestedEquipment));
         // Krok 3: Předání zbytku vybavení, podpis smlouvy, doplacení, ...
         Wait(HandoverTime());
         // Nakonec dojde k uvolnění prodavače
@@ -123,35 +158,56 @@ class Reservation : public Process {
         Seize(seller);
 
         // Kontrola stavu vybavení
-        Wait(CheckTime());        
+        Wait(CheckTime(requestedEquipment));    
+        
+        int broken = 0;
+        int wet = 0; 
+
+        for(int i = 0; i < requestedEquipment; i++) {
+            Random() < 0.05 ? broken++ : wet++;
+        }
+        
+        if (wet > 0) {
+            // Sušení vybavení
+            (new EquipmentDrying(wet))->Activate();
+        }
 
         // Rozhodnutí o stavu vybavení (5% šance, že bude poškozené)
-        if (Random() < 0.05) {  // 5% pravděpodobnost poškození
+        if (broken > 0) {  // 5% pravděpodobnost poškození
             // Vyřizování škod se zákazníkem
             Wait(DamageSettlementTime());
+            // Usušení rozbitých lodí před opravou
+            Wait(DryingTime(broken));
             // Uvolnění obsluhy
             Release(seller);
             // Vybavení jde do opravy
-            (new EquipmentRepair(requestedEquipment))->Activate();
-            // Leave(equipment, requestedEquipment);
+            (new EquipmentRepair(broken))->Activate();
         } else {
-            // Sušení vybavení
-            (new EquipmentDrying(requestedEquipment))->Activate();
             // Uvolnění obsluhy
             Release(seller);
-            // Vybavení je v pořádku
-            // Leave(equipment, requestedEquipment);
         }
     }
 };
 
-// Generátor rezervací
+// Generátor rezervací (pro jednotlivce/malé skupinky)
 class ReservationGenerator : public Event {
     void Behavior() {
         // Sezóna - generátor je aktivní
-        if (Time < SEASON_DURATION) { // TODO: zkontrolovat, jestli tu nemá být místo if while cyklus
+        if (Time < SEASON_DURATION) {
             (new Reservation)->Activate();
             Activate(Time + ReservationInterval());
+        }
+    }
+};
+
+// Generátor rezervací (pro velké skupiny)
+class BigReservationGenerator : public Event {
+    void Behavior() {
+        // Sezóna - generátor je aktivní
+        if (Time < SEASON_DURATION) {
+            bigReservation = true;
+            (new Reservation)->Activate();
+            Activate(Time + BigReservationInterval());
         }
     }
 };
@@ -160,8 +216,11 @@ int main() {
     // Inicializace simulace
     double simulation_duration = SEASON_DURATION + OFF_SEASON_DURATION;
     Init(0, simulation_duration);  // Simulace aktivní sezóny
+    
     // Aktivace generátoru rezervací
     (new ReservationGenerator)->Activate();
+    (new BigReservationGenerator)->Activate();
+
     // Spuštění simulace
     Run();
     seller.Output();
