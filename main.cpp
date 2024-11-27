@@ -2,8 +2,8 @@
 #include <iostream>
 #include <algorithm>
 
-Facility seller("Obsluha/Zaměstnanec"); // Obsluha s kapacitou 1
-Store equipment(40);                    // Sklad vybavení se 40 kusy
+Facility employee("Obsluha/Zaměstnanec"); // Obsluha s kapacitou 1
+Store boat("Lodě", 40);                    // Sklad lodí se 40 kusy
 double x = 720;                         // Střední hodnota mezi rezervacemi (v minutách) // TODO: bude jako parametr
 bool bigReservation = false;            // Příznak, zda se jedná o velkou skupinku
 
@@ -88,11 +88,11 @@ double DamageSettlementTime() {
 }
 
 // Simulování náhodného počtu chtěného vybavení
-int RandomEquipmentAmount() {
+int RandomBoatAmount() {
     int amount = 0;
     // Průměrně 2 kusy vybavení, pro velké skupinky 20 kusů
     bigReservation ? amount = int(Exponential(20)) + 10 : amount = int(Exponential(2)) + 1;
-    std::cout << "Requested equipment: " << amount << std::endl;
+    std::cout << "Requested boat: " << amount << std::endl;
     
     // V případě velké skupinky se omezí počet vybavení na 40, jinak 30
     if(bigReservation) {
@@ -104,24 +104,24 @@ int RandomEquipmentAmount() {
 }
 
 // Proces sušení vybavení
-class EquipmentDrying : public Process {
+class boatDrying : public Process {
     int amount;
 public:
-    EquipmentDrying(int n) : amount(n) {}
+    boatDrying(int n) : amount(n) {}
     void Behavior() {
         Wait(DryingTime(amount));
-        Leave(equipment, amount);
+        Leave(boat, amount);
     }
 };
 
 // Proces opravy vybavení
-class EquipmentRepair : public Process {
+class boatRepair : public Process {
     int amount;
 public:
-    EquipmentRepair(int n) : amount(n) {}
+    boatRepair(int n) : amount(n) {}
     void Behavior() {
         Wait(RepairTime());  // 1-2 týdny
-        Leave(equipment, amount);
+        Leave(boat, amount);
     }
 };
 
@@ -133,21 +133,21 @@ class Reservation : public Process {
         Wait(AgreedTime());
         
         // Kontrola dostupnosti vybavení
-        int requestedEquipment = RandomEquipmentAmount(); // Náhodný počet vybavení (1-30, průměrně 2)
-        Enter(equipment, requestedEquipment);
+        int requestedboat = RandomBoatAmount(); // Náhodný počet vybavení (1-30, průměrně 2)
+        Enter(boat, requestedboat);
 
         // Žádost o obsluhu prodavačem (zákazník přichází, čeká na obsluhu)
-        Seize(seller);
+        Seize(employee);
 
         // Obsluha zákazníka:
         // Krok 1: Nafouknutí lodě a poučení o používání
-        Wait(InflatingTime(requestedEquipment));
+        Wait(InflatingTime(requestedboat));
         // Krok 2: Předvedení lodě, vyfouknutí a sbalení
-        Wait(DemonstratingTime(requestedEquipment));
+        Wait(DemonstratingTime(requestedboat));
         // Krok 3: Předání zbytku vybavení, podpis smlouvy, doplacení, ...
         Wait(HandoverTime());
         // Nakonec dojde k uvolnění prodavače
-        Release(seller);
+        Release(employee);
 
         // Vypůjčení vybavení
         // Čekání po dobu výpůjčky
@@ -155,21 +155,21 @@ class Reservation : public Process {
 
         // Vracení vybavení
         // Musí se čekat na uvolnění obsluhy
-        Seize(seller);
+        Seize(employee);
 
         // Kontrola stavu vybavení
-        Wait(CheckTime(requestedEquipment));    
+        Wait(CheckTime(requestedboat));    
         
         int broken = 0;
         int wet = 0; 
 
-        for(int i = 0; i < requestedEquipment; i++) {
+        for(int i = 0; i < requestedboat; i++) {
             Random() < 0.05 ? broken++ : wet++;
         }
         
         if (wet > 0) {
             // Sušení vybavení
-            (new EquipmentDrying(wet))->Activate();
+            (new boatDrying(wet))->Activate();
         }
 
         // Rozhodnutí o stavu vybavení (5% šance, že bude poškozené)
@@ -179,12 +179,12 @@ class Reservation : public Process {
             // Usušení rozbitých lodí před opravou
             Wait(DryingTime(broken));
             // Uvolnění obsluhy
-            Release(seller);
+            Release(employee);
             // Vybavení jde do opravy
-            (new EquipmentRepair(broken))->Activate();
+            (new boatRepair(broken))->Activate();
         } else {
             // Uvolnění obsluhy
-            Release(seller);
+            Release(employee);
         }
     }
 };
@@ -223,7 +223,7 @@ int main() {
 
     // Spuštění simulace
     Run();
-    seller.Output();
-    equipment.Output();
+    employee.Output();
+    boat.Output();
     return 0;
 }
