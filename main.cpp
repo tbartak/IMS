@@ -14,10 +14,27 @@ const double OFF_SEASON_DURATION = 5.5 * MONTH; // Délka mimo sezóny
 
 // Vytvoření nové rezervace s exponenciálním rozložením se středem x
 double ReservationInterval() {
+    double currentTime = Time;
+
+    double firstMonth = 1 * MONTH;
+    double lastMonth = SEASON_DURATION - 1 * MONTH;
+
+    if(currentTime <= firstMonth || currentTime >= lastMonth) {
+        return Exponential(2 * x);
+    }
+
     return Exponential(x);
 }
 
 double BigReservationInterval() {
+    double currentTime = Time;
+
+    double firstMonth = 1 * MONTH;
+    double lastMonth = SEASON_DURATION - 1 * MONTH;
+
+    if(currentTime <= firstMonth || currentTime >= lastMonth) {
+        return Exponential(40 * x);
+    }
     return Exponential(20 * x);
 }
 
@@ -62,18 +79,22 @@ double BorrowTime() {
 double CheckTime(int amount) {
     // Implementace doby kontroly
     int sum = 0;
+
     for (int i = 0; i < amount; i++) {
         sum += Uniform(5, 10); // 5 to 10 minutes
     }
+
     return sum;
 }
 
 // Simulování doby vysoušení vybavení
 double DryingTime(int amount) {
     int sum = 0;
+
     for (int i = 0; i < amount; i++) {
         sum += Uniform(2, 15); // 2 to 15 minutes
     }
+
     return sum; 
 }
 
@@ -90,14 +111,15 @@ double DamageSettlementTime() {
 // Simulování náhodného počtu chtěného vybavení
 int RandomBoatAmount() {
     int amount = 0;
+
     // Průměrně 2 kusy vybavení, pro velké skupinky 20 kusů
     bigReservation ? amount = int(Exponential(20)) + 10 : amount = int(Exponential(2)) + 1;
-    std::cout << "Requested boat: " << amount << std::endl;
     
     // V případě velké skupinky se omezí počet vybavení na 40, jinak 30
     if(bigReservation) {
         bigReservation = false;
         return (amount > 40) ? 40 : amount;
+
     } else {
         return (amount > 10) ? 10 : amount;
     }
