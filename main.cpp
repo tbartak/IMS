@@ -4,21 +4,19 @@
 #include <vector>
 #include "Parser.hpp"
 
-#define defaultBoatNum 40
+Facility employee("Obsluha/Zaměstnanec");   // Obsluha s kapacitou 1
+int boatNumber;                            // Počet lodí    
+Store *boat;                                // Sklad lodí se 40 kusy
+double x;                                   // Střední hodnota mezi rezervacemi (v minutách) // TODO: bude jako parametr
+bool bigReservation = false;                // Příznak, zda se jedná o velkou skupinku
+int deniedReservations = 0;                 // Počet odmítnutých rezervací
 
-Facility employee("Obsluha/Zaměstnanec"); // Obsluha s kapacitou 1
-int boatNumber = defaultBoatNum;
-Store *boat;                   // Sklad lodí se 40 kusy
-double x;                                  // Střední hodnota mezi rezervacemi (v minutách) // TODO: bude jako parametr
-bool bigReservation = false;            // Příznak, zda se jedná o velkou skupinku
-
-// Délka sezóny a mimo sezóny v minutách
 const double MONTH = 30 * 24 * 60;              // Jeden měsíc v minutách
 double SEASON_DURATION;                         // Délka sezóny
-double OFF_SEASON_DURATION; // Délka mimo sezóny
+double OFF_SEASON_DURATION;                     // Délka mimo sezóny
 double ACTIVE_SEASON_COUNT;
 
-std::vector<class Reservation*> reservations;  // Rezervace
+std::vector<class Reservation*> reservations;   // Rezervace
 
 // Vytvoření nové rezervace s exponenciálním rozložením se středem x
 double ReservationInterval() {
@@ -27,6 +25,7 @@ double ReservationInterval() {
     double firstMonth = 1 * MONTH;
     double lastMonth = SEASON_DURATION - 1 * MONTH;
 
+    // V prvním a posledním měsíci sezóny se zvýší střední hodnota exponenciálního rozložení (pro simulaci menšího příchodu zákazníků)
     if(currentTime <= firstMonth || currentTime >= lastMonth) {
         return Exponential(2 * x);
     }
@@ -34,12 +33,14 @@ double ReservationInterval() {
     return Exponential(x);
 }
 
+// Vytvoření nové rezervace pro velkou skupinu s exponenciálním rozložením se středem x
 double BigReservationInterval() {
     double currentTime = Time;
 
     double firstMonth = 1 * MONTH;
     double lastMonth = SEASON_DURATION - 1 * MONTH;
 
+    // V prvním a posledním měsíci sezóny se zvýší střední hodnota exponenciálního rozložení (pro simulaci menšího příchodu zákazníků)
     if(currentTime <= firstMonth || currentTime >= lastMonth) {
         return Exponential(40 * x);
     }
@@ -56,7 +57,7 @@ double InflatingTime(int amount) {
     int sum = 0;
 
     for(int i = 0; i < amount; i++) {
-        sum += Uniform(3, 8);   // 3 to 8 minutes
+        sum += Uniform(3, 8);       // 3 až 8 minut
     }
     
     return sum;  
@@ -75,7 +76,7 @@ double DemonstratingTime(int amount) {
 
 // Simulování předání zbytku vybavení + podpis smlouvy, doplacení, ...
 double HandoverTime() {
-    return Uniform(4, 10);  // 4 to 10 minutes
+    return Uniform(4, 10);  // 4 až 10 minut
 }
 
 // Simulování doby výpůjčky
@@ -89,7 +90,7 @@ double CheckTime(int amount) {
     int sum = 0;
 
     for (int i = 0; i < amount; i++) {
-        sum += Uniform(5, 10); // 5 to 10 minutes
+        sum += Uniform(5, 10);  // 5 až 10 minut
     }
 
     return sum;
@@ -100,7 +101,7 @@ double DryingTime(int amount) {
     int sum = 0;
 
     for (int i = 0; i < amount; i++) {
-        sum += Uniform(2, 15); // 2 to 15 minutes
+        sum += Uniform(2, 15);  // 2 až 15 minut
     }
 
     return sum; 
@@ -162,11 +163,13 @@ public:
     double reservationStart;
     double reservationEnd;
 
+    // Konstruktor
     Reservation(int boats, double start, double end)
         : requestedBoat(boats), reservationStart(start), reservationEnd(end) {}
 
     void Behavior() {      
 
+        // Rezervace lodí
         Wait(reservationStart - Time);
         Enter(*boat, requestedBoat);
 
@@ -197,17 +200,18 @@ public:
         int broken = 0;
         int wet = 0; 
 
+        // Rozhodnutí o stavu vybavení (5% šance, že bude poškozené)
         for(int i = 0; i < requestedBoat; i++) {
             Random() < 0.05 ? broken++ : wet++;
         }
-        
+        // Usušit mokré vybavení
         if (wet > 0) {
             // Sušení vybavení
             (new boatDrying(wet))->Activate();
         }
 
-        // Rozhodnutí o stavu vybavení (5% šance, že bude poškozené)
-        if (broken > 0) {  // 5% pravděpodobnost poškození
+        // Oprava poškozeného vybavení
+        if (broken > 0) {
             // Vyřizování škod se zákazníkem
             Wait(DamageSettlementTime());
             // Usušení rozbitých lodí před opravou
@@ -221,7 +225,7 @@ public:
             Release(employee);
         }
 
-        // Remove the reservation from the list
+        // Odstranění rezervace ze seznamu
         auto it = std::find(reservations.begin(), reservations.end(), this);
         if (it != reservations.end()) {
             reservations.erase(it);
@@ -229,39 +233,43 @@ public:
     }
 };
 
+// Zjištění, zda je dostatek lodí k dispozici pro novou rezervaci
 bool IsAvailable(int requestedBoat, double start, double end, std::vector<Reservation*>& reservations) {
     int boatsInUse = 0;
 
     for (auto& res : reservations) {
-        // Najdi rezervace, které se překrývají s novou rezervací
+        // Najdi rezervace, které se nepřekrývají s novou rezervací
         if (!(res->reservationEnd <= start || res->reservationStart >= end)) {
             boatsInUse += res->requestedBoat;
         }
     }
     
+    // Pokud je dostatek lodí k dispozici, vrátí true
     return (boatsInUse + requestedBoat) <= boatNumber;
 }
 
+// Najdi nejbližší čas, kdy je dostatek lodí k dispozici
 double FindEarliestAvailableTime(int requestedBoat, double desiredStart, double desiredEnd, std::vector<Reservation*>& reservations) {
-    // Najdi nejbližší čas, kdy je dostatek lodí k dispozici
     double currentTime = Time;
-
+    // Hledej nejbližší čas, kdy je dostatek lodí k dispozici
     while (currentTime < desiredStart) {
         if (IsAvailable(requestedBoat, currentTime, currentTime + (desiredEnd - desiredStart), reservations)) {
             return currentTime;
         }
-        currentTime += 60; // Přeskoč na další hodinu
+        currentTime += 60;  // Přeskoč na další hodinu
     }
 
-    return -1; // Nenalezeno
+    return -1;  // Nenalezeno
 }
 
+// Vytvoření nové rezervace
 void CreateReservation() {
     int requestedBoat = RandomBoatAmount();
     double start = Time + AgreedTime();
     double duration = BorrowTime();
     double end = start + duration;
 
+    // Pokud je dostatek lodí k dispozici, vytvoř ihned novou rezervaci
     if (IsAvailable(requestedBoat, start, end, reservations)) {
         auto reservation = new Reservation(requestedBoat, start, end);
         reservations.push_back(reservation);
@@ -270,10 +278,13 @@ void CreateReservation() {
     } else {
         // Pokud není dostatek lodí k dispozici, najdi nejbližší čas, kdy je dostatek lodí k dispozici
         double earliestAvailable = FindEarliestAvailableTime(requestedBoat, start, end, reservations);
-        if (earliestAvailable >= 0) {
+        if (earliestAvailable >= 0) { // Pokud je nalezen vhodný čas, vytvoř rezervaci
             auto reservation = new Reservation(requestedBoat, earliestAvailable, earliestAvailable + duration);
             reservations.push_back(reservation);
             reservation->Activate(earliestAvailable);
+
+        } else { // Pokud není nalezen vhodný čas, rezervace je odmítnuta
+            deniedReservations++;
         }
     }
 }
@@ -301,9 +312,11 @@ class BigReservationGenerator : public Event {
     }
 };
 
+// Hlavní funkce
 int main(int argc, char* argv[]) {
     Parser argParser;
 
+    // Zpracování argumentů
     if(argParser.parseArguments(argc, argv) == -1) {
         return -1;
     }
@@ -311,6 +324,7 @@ int main(int argc, char* argv[]) {
     x = 1440 / argParser.getCustomers(); // 1440 minut = 1 den
     SEASON_DURATION = argParser.getSeasonLength() * MONTH;
 
+    // Ošetření, aby délka sezóny nebyla delší než 12 měsíců
     if (SEASON_DURATION > 12 * MONTH)
     {
         SEASON_DURATION = 12 * MONTH;
@@ -330,7 +344,11 @@ int main(int argc, char* argv[]) {
 
     // Spuštění simulace
     Run();
+
+    // Výstupní informace
     employee.Output();
     boat->Output();
+    std::cout << "Denied reservations: " << deniedReservations << std::endl;
+    
     return 0;
 }
