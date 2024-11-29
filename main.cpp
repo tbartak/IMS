@@ -1,16 +1,21 @@
 #include <simlib.h>
 #include <iostream>
 #include <algorithm>
+#include "Parser.hpp"
+
+#define defaultBoatNum 40
 
 Facility employee("Obsluha/Zaměstnanec"); // Obsluha s kapacitou 1
-Store boat("Lodě", 40);                    // Sklad lodí se 40 kusy
-double x = 720;                         // Střední hodnota mezi rezervacemi (v minutách) // TODO: bude jako parametr
+int boatNumber = defaultBoatNum;
+Store *boat;                   // Sklad lodí se 40 kusy
+double x;                                  // Střední hodnota mezi rezervacemi (v minutách) // TODO: bude jako parametr
 bool bigReservation = false;            // Příznak, zda se jedná o velkou skupinku
 
 // Délka sezóny a mimo sezóny v minutách
 const double MONTH = 30 * 24 * 60;              // Jeden měsíc v minutách
-const double SEASON_DURATION = 6.5 * MONTH;     // Délka sezóny
-const double OFF_SEASON_DURATION = 5.5 * MONTH; // Délka mimo sezóny
+double SEASON_DURATION;                         // Délka sezóny
+double OFF_SEASON_DURATION; // Délka mimo sezóny
+double ACTIVE_SEASON_COUNT;
 
 // Vytvoření nové rezervace s exponenciálním rozložením se středem x
 double ReservationInterval() {
@@ -113,7 +118,7 @@ int RandomBoatAmount() {
     int amount = 0;
 
     // Průměrně 2 kusy vybavení, pro velké skupinky 20 kusů
-    bigReservation ? amount = int(Exponential(20)) + 10 : amount = int(Exponential(2)) + 1;
+    bigReservation ? amount = int(Exponential(10)) + 10 : amount = int(Exponential(2)) + 1;
     
     // V případě velké skupinky se omezí počet vybavení na 40, jinak 30
     if(bigReservation) {
@@ -132,7 +137,7 @@ public:
     boatDrying(int n) : amount(n) {}
     void Behavior() {
         Wait(DryingTime(amount));
-        Leave(boat, amount);
+        Leave(*boat, amount);
     }
 };
 
@@ -143,7 +148,7 @@ public:
     boatRepair(int n) : amount(n) {}
     void Behavior() {
         Wait(RepairTime());  // 1-2 týdny
-        Leave(boat, amount);
+        Leave(*boat, amount);
     }
 };
 
@@ -156,7 +161,7 @@ class Reservation : public Process {
         
         // Kontrola dostupnosti vybavení
         int requestedboat = RandomBoatAmount(); // Náhodný počet vybavení (1-30, průměrně 2)
-        Enter(boat, requestedboat);
+        Enter(*boat, requestedboat);
 
         // Žádost o obsluhu prodavačem (zákazník přichází, čeká na obsluhu)
         Seize(employee);
@@ -234,7 +239,25 @@ class BigReservationGenerator : public Event {
     }
 };
 
-int main() {
+int main(int argc, char* argv[]) {
+    Parser argParser;
+
+    if(argParser.parseArguments(argc, argv) == -1) {
+        return -1;
+    }
+
+    x = 1440 / argParser.getCustomers(); // 1440 minut = 1 den
+    SEASON_DURATION = argParser.getSeasonLength() * MONTH;
+
+    if (SEASON_DURATION > 12 * MONTH)
+    {
+        SEASON_DURATION = 12 * MONTH;
+    }
+    OFF_SEASON_DURATION = 12 * MONTH - SEASON_DURATION;
+    boatNumber = argParser.getBoatNumber();
+
+    boat = new Store("Lodě", boatNumber);  // Sklad lodí (v základu se 40 kusy)
+
     // Inicializace simulace
     double simulation_duration = SEASON_DURATION + OFF_SEASON_DURATION;
     Init(0, simulation_duration);  // Simulace aktivní sezóny
@@ -246,6 +269,6 @@ int main() {
     // Spuštění simulace
     Run();
     employee.Output();
-    boat.Output();
+    boat->Output();
     return 0;
 }
