@@ -1,6 +1,7 @@
 #include <simlib.h>
 #include <iostream>
 #include <algorithm>
+#include <vector>
 #include "Parser.hpp"
 
 #define defaultBoatNum 40
@@ -16,6 +17,8 @@ const double MONTH = 30 * 24 * 60;              // Jeden měsíc v minutách
 double SEASON_DURATION;                         // Délka sezóny
 double OFF_SEASON_DURATION; // Délka mimo sezóny
 double ACTIVE_SEASON_COUNT;
+
+std::vector<class Reservation*> reservations;  // Rezervace
 
 // Vytvoření nové rezervace s exponenciálním rozložením se středem x
 double ReservationInterval() {
@@ -118,7 +121,7 @@ int RandomBoatAmount() {
     int amount = 0;
 
     // Průměrně 2 kusy vybavení, pro velké skupinky 20 kusů
-    bigReservation ? amount = int(Exponential(10)) + 10 : amount = int(Exponential(2)) + 1;
+    bigReservation ? amount = int(Exponential(1)) + 10 : amount = int(Exponential(2)) + 1;
     
     // V případě velké skupinky se omezí počet vybavení na 40, jinak 30
     if(bigReservation) {
@@ -154,23 +157,27 @@ public:
 
 // Třída představující rezervaci
 class Reservation : public Process {
+public:
+    int requestedBoat;
+    double reservationStart;
+    double reservationEnd;
+
+    Reservation(int boats, double start, double end)
+        : requestedBoat(boats), reservationStart(start), reservationEnd(end) {}
+
     void Behavior() {      
 
-        // Čekání do domluveného termínu
-        Wait(AgreedTime());
-        
-        // Kontrola dostupnosti vybavení
-        int requestedboat = RandomBoatAmount(); // Náhodný počet vybavení (1-30, průměrně 2)
-        Enter(*boat, requestedboat);
+        Wait(reservationStart - Time);
+        Enter(*boat, requestedBoat);
 
         // Žádost o obsluhu prodavačem (zákazník přichází, čeká na obsluhu)
         Seize(employee);
 
         // Obsluha zákazníka:
         // Krok 1: Nafouknutí lodě a poučení o používání
-        Wait(InflatingTime(requestedboat));
+        Wait(InflatingTime(requestedBoat));
         // Krok 2: Předvedení lodě, vyfouknutí a sbalení
-        Wait(DemonstratingTime(requestedboat));
+        Wait(DemonstratingTime(requestedBoat));
         // Krok 3: Předání zbytku vybavení, podpis smlouvy, doplacení, ...
         Wait(HandoverTime());
         // Nakonec dojde k uvolnění prodavače
@@ -178,19 +185,19 @@ class Reservation : public Process {
 
         // Vypůjčení vybavení
         // Čekání po dobu výpůjčky
-        Wait(BorrowTime());
+        Wait(reservationEnd - reservationStart);
 
         // Vracení vybavení
         // Musí se čekat na uvolnění obsluhy
         Seize(employee);
 
         // Kontrola stavu vybavení
-        Wait(CheckTime(requestedboat));    
+        Wait(CheckTime(requestedBoat));    
         
         int broken = 0;
         int wet = 0; 
 
-        for(int i = 0; i < requestedboat; i++) {
+        for(int i = 0; i < requestedBoat; i++) {
             Random() < 0.05 ? broken++ : wet++;
         }
         
@@ -213,15 +220,70 @@ class Reservation : public Process {
             // Uvolnění obsluhy
             Release(employee);
         }
+
+        // Remove the reservation from the list
+        auto it = std::find(reservations.begin(), reservations.end(), this);
+        if (it != reservations.end()) {
+            reservations.erase(it);
+        }
     }
 };
+
+bool IsAvailable(int requestedBoat, double start, double end, std::vector<Reservation*>& reservations) {
+    int boatsInUse = 0;
+
+    for (auto& res : reservations) {
+        // Najdi rezervace, které se překrývají s novou rezervací
+        if (!(res->reservationEnd <= start || res->reservationStart >= end)) {
+            boatsInUse += res->requestedBoat;
+        }
+    }
+    
+    return (boatsInUse + requestedBoat) <= boatNumber;
+}
+
+double FindEarliestAvailableTime(int requestedBoat, double desiredStart, double desiredEnd, std::vector<Reservation*>& reservations) {
+    // Najdi nejbližší čas, kdy je dostatek lodí k dispozici
+    double currentTime = Time;
+
+    while (currentTime < desiredStart) {
+        if (IsAvailable(requestedBoat, currentTime, currentTime + (desiredEnd - desiredStart), reservations)) {
+            return currentTime;
+        }
+        currentTime += 60; // Přeskoč na další hodinu
+    }
+
+    return -1; // Nenalezeno
+}
+
+void CreateReservation() {
+    int requestedBoat = RandomBoatAmount();
+    double start = Time + AgreedTime();
+    double duration = BorrowTime();
+    double end = start + duration;
+
+    if (IsAvailable(requestedBoat, start, end, reservations)) {
+        auto reservation = new Reservation(requestedBoat, start, end);
+        reservations.push_back(reservation);
+        reservation->Activate(start);
+
+    } else {
+        // Pokud není dostatek lodí k dispozici, najdi nejbližší čas, kdy je dostatek lodí k dispozici
+        double earliestAvailable = FindEarliestAvailableTime(requestedBoat, start, end, reservations);
+        if (earliestAvailable >= 0) {
+            auto reservation = new Reservation(requestedBoat, earliestAvailable, earliestAvailable + duration);
+            reservations.push_back(reservation);
+            reservation->Activate(earliestAvailable);
+        }
+    }
+}
 
 // Generátor rezervací (pro jednotlivce/malé skupinky)
 class ReservationGenerator : public Event {
     void Behavior() {
         // Sezóna - generátor je aktivní
         if (Time < SEASON_DURATION) {
-            (new Reservation)->Activate();
+            CreateReservation();
             Activate(Time + ReservationInterval());
         }
     }
@@ -233,7 +295,7 @@ class BigReservationGenerator : public Event {
         // Sezóna - generátor je aktivní
         if (Time < SEASON_DURATION) {
             bigReservation = true;
-            (new Reservation)->Activate();
+            CreateReservation();
             Activate(Time + BigReservationInterval());
         }
     }
